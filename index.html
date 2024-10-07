@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ubuntu+Sans:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+* {
+  font-family: "Ubuntu Sans", sans-serif;
+  font-optical-sizing: auto;
+  font-style: normal;
+  font-variation-settings:
+    "wdth" 100;
+}
+tr {
+  height: 50px
+}
+
+thead > tr {
+  background-color: #CF5C36;
+  color: white;
+}
+
+tbody > tr:nth-child(even) {
+  background-color: white;
+}
+tbody > tr:nth-child(odd) {
+  background-color: #D3D5D7;
+}
+table {
+  width: 100%;
+}
+
+td, th {
+  padding: 10px;
+  white-space: nowrap;
+}
+
+tr > td:nth-child(2) {
+  width: 100%;
+  text-overflow: ellipsis;
+}
+</style>
+<script>
+const sort = (a, b) => (
+  a.type === "folder-back" && b.type !== "folder-back" ? -1
+  : a.type !== "folder-back" && b.type === "folder-back" ? 1
+  : a.type === "folder" && b.type !== "folder" ? -1
+  : a.type !== "folder" && b.type === "folder" ? 1
+  : a.name < b.name ? -1 : 1
+)
+const data = () => (JSON.parse("{{ .entries }}")).sort(sort)
+</script>
+</head>
+<body>
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Name</th>
+      <th>Size</th>
+      <th>Last modified</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody x-data="{ entries: [] }" x-init="entries = data()">
+    <template x-for="entry in entries" :key="entry.name">
+      <tr>
+        <td>
+          <a x-bind:href="entry.url">
+            <img x-bind:src="'/static/' + entry.type + '.svg'" width="30">
+          </a>
+        </td>
+        <td>
+          <a x-bind:href="entry.url" x-text="entry.name"></a>
+        </td>
+        <td x-text="entry.size"></td>
+        <td x-text="entry.last_modified"></td>
+        <td>
+          <template x-if="entry.type === 'media'">
+            <a x-bind:href="'vlc://' + window.location.host + window.location.pathname + entry.url">
+              <img src="/static/vlc.svg" width="30">
+            </a>
+          </template>
+          <template x-if="entry.type !== 'media'">
+            <img src="" width="30">
+          </template>
+        </td>
+      </tr>
+    </template>
+  </tbody>
+</table>
+</body>
+</html>
