@@ -1,7 +1,7 @@
 <!doctype html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=0">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,7 +12,7 @@
   font-optical-sizing: auto;
   font-style: normal;
   font-variation-settings:
-    "wdth" 100;
+    "width" 100;
 }
 tr {
   height: 50px
@@ -38,9 +38,12 @@ td, th {
   white-space: nowrap;
 }
 
-tr > td:nth-child(2) {
+tr > td:nth-of-type(2) {
   width: 100%;
   text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 0;
 }
 </style>
 <script>
