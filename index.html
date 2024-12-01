@@ -14,6 +14,10 @@
   font-variation-settings:
     "width" 100;
 }
+a { 
+  color: black;
+  text-decoration: none;
+}
 tr {
   height: 50px
 }
@@ -54,6 +58,20 @@ const sort = (a, b) => (
   : a.type !== "folder" && b.type === "folder" ? 1
   : a.name < b.name ? -1 : 1
 )
+const markAsRead = (pathname, entry, selected) => (
+  selected[pathname + entry.url] = !selected[pathname + entry.url] && entry.url !== ".."
+)
+const refreshStorage = selected => localStorage.setItem(
+  "selected", 
+  JSON.stringify(selected)
+)
+const getItemIcon = (pathname, entry, selected) => (
+  selected[pathname + entry.url] 
+  ? "/static/check.svg" 
+  : ("/static/" + entry.type + ".svg")
+)
+
+const loadStorage = () => JSON.parse(localStorage.getItem('selected') || '{}')
 const data = () => (JSON.parse("{{ .entries }}")).sort(sort)
 </script>
 </head>
@@ -68,13 +86,15 @@ const data = () => (JSON.parse("{{ .entries }}")).sort(sort)
       <th></th>
     </tr>
   </thead>
-  <tbody x-data="{ entries: [] }" x-init="entries = data()">
+  <tbody x-data="{ entries: [], selected: {} }" x-init="entries = data(); selected = loadStorage()">
     <template x-for="entry in entries" :key="entry.name">
       <tr>
         <td>
-          <a x-bind:href="entry.url">
-            <img x-bind:src="'/static/' + entry.type + '.svg'" width="30">
-          </a>
+            <img 
+              x-on:click="[markAsRead(window.location.pathname, entry, selected), refreshStorage(selected)]" 
+              x-bind:src="getItemIcon(window.location.pathname, entry, selected)" 
+              width="30"
+            >
         </td>
         <td>
           <a x-bind:href="entry.url" x-text="entry.name"></a>
