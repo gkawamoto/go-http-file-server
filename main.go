@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gkawamoto/go-http-file-server/auth"
 	"github.com/gkawamoto/go-http-file-server/files"
 )
 
@@ -21,6 +22,9 @@ func main() {
 	addr := flag.String("addr", envOrDefault("ADDR", "0.0.0.0"), "Address to listen to")
 
 	directoryPath := flag.String("dir", envOrDefault("DIR", "."), "Directory to serve")
+
+	username := flag.String("username", envOrDefault("USERNAME", "admin"), "Username for authentication")
+	password := flag.String("password", envOrDefault("PASSWORD", "admin"), "Password for authentication")
 
 	jsonLogs := flag.Bool("json-logs", envOrDefault("JSON_LOGS", false), "Enable JSON formatted logs")
 
@@ -34,10 +38,15 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Auth routes
+	mux.Handle("/auth", auth.NewHandler(*username, *password))
+	mux.HandleFunc("/logout", auth.HandleLogout)
+
+	// Protected routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/files/", http.StatusTemporaryRedirect)
 	})
-	mux.Handle("/files/", files.NewHandler(*directoryPath))
+	mux.Handle("/files/", auth.RequireAuth(files.NewHandler(*directoryPath)))
 	mux.Handle("/static/", http.FileServerFS(static))
 
 	s := &http.Server{
