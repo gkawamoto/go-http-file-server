@@ -34,6 +34,8 @@ COPY --from=builder /app/go-http-file-server /go-http-file-server
 # Expose port 8080 (default port for the application)
 EXPOSE 8080
 
+ENV JSON_LOGS=true
+
 WORKDIR /data
 
 # Create a volume for data storage
