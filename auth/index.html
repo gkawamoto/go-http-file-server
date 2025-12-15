@@ -89,6 +89,9 @@ input[type="password"]:focus {
   margin-bottom: 1rem;
   border: 1px solid #f5c6cb;
 }
+.error:empty {
+  display: none;
+}
 </style>
 </head>
 <body>
@@ -97,14 +100,14 @@ input[type="password"]:focus {
       <h1>🔐 File Server Login</h1>
   </div>
   
-  {{error}}
+  <div class="error">{{.error}}</div>
   
   <form method="POST">
     <input type="hidden" name="redirect" value="{{.redirect}}">
     
     <div class="form-group">
       <label for="username">Username:</label>
-      <input type="text" id="username" name="username" required autocomplete="username">
+      <input type="text" id="username" name="username" required autocomplete="username" autofocus>
     </div>
     
     <div class="form-group">

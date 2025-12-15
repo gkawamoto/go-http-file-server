@@ -4,10 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,115 +22,142 @@ const (
 	cookieDuration = 24 * time.Hour
 )
 
-// getJWTSecret returns the JWT secret from environment or default
-func getJWTSecret() []byte {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		// Default secret - should be changed in production
-		secret = "your-secret-key-change-this-in-production"
-	}
-	return []byte(secret)
-}
-
 // Claims represents the JWT claims
 type Claims struct {
 	Username string `json:"username"`
 	jwt.RegisteredClaims
 }
 
-// NewHandler creates a new auth handler
-func NewHandler(username, password string) http.Handler {
-	return &handler{
-		username: username,
-		password: password,
+// Auth handles authentication and provides middleware
+type Auth struct {
+	username  string
+	password  string
+	jwtSecret []byte
+
+	mux  *http.ServeMux
+	tplt *template.Template
+}
+
+// NewAuth creates a new Auth instance with configured routes
+func NewAuth(username, password, jwtSecret string) (*Auth, error) {
+	if jwtSecret == "" {
+		// Default secret - should be changed in production
+		jwtSecret = "your-secret-key-change-this-in-production"
 	}
+
+	tplt, err := template.New("").Parse(loginPage)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing login page template: %w", err)
+	}
+
+	auth := &Auth{
+		username:  username,
+		password:  password,
+		jwtSecret: []byte(jwtSecret),
+
+		tplt: tplt,
+	}
+
+	mux := http.NewServeMux()
+	// Login routes - both /auth/ and /auth/login for convenience
+	mux.HandleFunc("/", auth.handleAuthRequest)
+	mux.HandleFunc("/login", auth.handleAuthRequest)
+	mux.HandleFunc("/logout", auth.handleLogout)
+
+	auth.mux = mux
+	return auth, nil
 }
 
-type handler struct {
-	username string
-	password string
+// ServeHTTP implements http.Handler, making Auth usable as a handler
+func (a *Auth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.mux.ServeHTTP(w, r)
 }
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (a *Auth) handleAuthRequest(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.showLoginPage(w, r)
+		a.showLoginPage(w, r)
 	case http.MethodPost:
-		h.handleLogin(w, r)
+		a.handleLogin(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *handler) showLoginPage(w http.ResponseWriter, r *http.Request) {
+func (a *Auth) showLoginPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
 	// Replace the error placeholder with empty string for normal display
-	cleanPage := strings.ReplaceAll(loginPage, "{{error}}", "")
-	w.Write([]byte(cleanPage))
+	if err := a.tplt.Execute(w, map[string]string{}); err != nil {
+		http.Error(w, "failed to render login page", http.StatusInternalServerError)
+		return
+	}
 }
 
-func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (a *Auth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
 	// Simple authentication (in production, use proper password hashing)
-	if username == h.username && password == h.password {
-		// Generate JWT token
-		token, err := generateJWTToken(username)
-		if err != nil {
-			http.Error(w, "Failed to generate token", http.StatusInternalServerError)
-			return
-		}
-
-		// Set authentication cookie with JWT token
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    token,
-			Expires:  time.Now().Add(cookieDuration),
-			HttpOnly: true,
-			Secure:   false, // Set to true in production with HTTPS
-			SameSite: http.SameSiteLaxMode,
-		})
-
-		// Redirect to the original destination or files page
-		redirectURL := r.FormValue("redirect")
-		if redirectURL == "" {
-			redirectURL = "/files/"
-		}
-		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
-	} else {
+	if username != a.username || password != a.password {
 		// Show login page with error
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusUnauthorized)
-		errorPage := strings.ReplaceAll(loginPage, "{{error}}", "<div class=\"error\">Invalid username or password</div>")
-		w.Write([]byte(errorPage))
+		if err := a.tplt.Execute(w, map[string]string{"error": "Invalid username or password"}); err != nil {
+			http.Error(w, "failed to render login page", http.StatusInternalServerError)
+		}
+		return
 	}
+
+	// Generate JWT token
+	token, err := a.generateJWTToken(username)
+	if err != nil {
+		http.Error(w, "failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	// Set authentication cookie with JWT token
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Expires:  time.Now().Add(cookieDuration),
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Redirect to the original destination or files page
+	redirectURL := r.FormValue("redirect")
+	if redirectURL == "" {
+		redirectURL = "/files/"
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
-// HandleLogout handles user logout
-func HandleLogout(w http.ResponseWriter, r *http.Request) {
+// handleLogout handles user logout (internal handler)
+func (a *Auth) handleLogout(w http.ResponseWriter, r *http.Request) {
 	// Clear the authentication cookie
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    "",
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
-		SameSite: http.SameSiteLaxMode,
+		Secure:   r.Header.Get("X-Forwarded-Proto") == "https",
+		SameSite: http.SameSiteStrictMode,
 	})
 
-	http.Redirect(w, r, "/auth", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, "/auth/", http.StatusFound)
 }
 
 // RequireAuth middleware that checks for authentication
-func RequireAuth(next http.Handler) http.Handler {
+func (a *Auth) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(cookieName)
-		if err != nil || !isValidJWTToken(cookie.Value) {
+		if err != nil || !a.isValidJWTToken(cookie.Value) {
 			// Redirect to login with the current URL as redirect parameter
-			loginURL := fmt.Sprintf("/auth?redirect=%s", url.QueryEscape(r.URL.String()))
-			http.Redirect(w, r, loginURL, http.StatusTemporaryRedirect)
+			loginURL := fmt.Sprintf("/auth/?redirect=%s", url.QueryEscape(r.URL.String()))
+			http.Redirect(w, r, loginURL, http.StatusFound)
 			return
 		}
 
@@ -140,7 +166,7 @@ func RequireAuth(next http.Handler) http.Handler {
 }
 
 // generateJWTToken creates a new JWT token for the user
-func generateJWTToken(username string) (string, error) {
+func (a *Auth) generateJWTToken(username string) (string, error) {
 	// Create the claims
 	claims := Claims{
 		Username: username,
@@ -158,7 +184,7 @@ func generateJWTToken(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	// Sign and return the token
-	tokenString, err := token.SignedString(getJWTSecret())
+	tokenString, err := token.SignedString(a.jwtSecret)
 	if err != nil {
 		return "", err
 	}
@@ -167,18 +193,18 @@ func generateJWTToken(username string) (string, error) {
 }
 
 // isValidJWTToken validates the JWT token
-func isValidJWTToken(tokenString string) bool {
+func (a *Auth) isValidJWTToken(tokenString string) bool {
 	if tokenString == "" {
 		return false
 	}
 
 	// Parse and validate the token
-	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (any, error) {
 		// Make sure the token method is HMAC
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return getJWTSecret(), nil
+		return a.jwtSecret, nil
 	})
 
 	if err != nil {
@@ -199,29 +225,4 @@ func generateRandomID() string {
 	bytes := make([]byte, 16)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
-}
-
-// GetUserFromToken extracts user information from JWT token in request
-func GetUserFromToken(r *http.Request) (string, error) {
-	cookie, err := r.Cookie(cookieName)
-	if err != nil {
-		return "", fmt.Errorf("no auth cookie found")
-	}
-
-	token, err := jwt.ParseWithClaims(cookie.Value, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return getJWTSecret(), nil
-	})
-
-	if err != nil {
-		return "", fmt.Errorf("invalid token: %v", err)
-	}
-
-	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims.Username, nil
-	}
-
-	return "", fmt.Errorf("invalid token claims")
 }

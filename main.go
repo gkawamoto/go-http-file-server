@@ -25,6 +25,7 @@ func main() {
 
 	username := flag.String("username", envOrDefault("USERNAME", "admin"), "Username for authentication")
 	password := flag.String("password", envOrDefault("PASSWORD", "admin"), "Password for authentication")
+	jwtSecret := flag.String("jwt-secret", envOrDefault("JWT_SECRET", ""), "JWT secret for authentication")
 
 	jsonLogs := flag.Bool("json-logs", envOrDefault("JSON_LOGS", false), "Enable JSON formatted logs")
 
@@ -38,15 +39,21 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Auth routes
-	mux.Handle("/auth", auth.NewHandler(*username, *password))
-	mux.HandleFunc("/logout", auth.HandleLogout)
+	// Create auth instance
+	authHandler, err := auth.NewAuth(*username, *password, *jwtSecret)
+	if err != nil {
+		slog.Error("error creating auth handler", "error", err)
+		os.Exit(1)
+	}
+
+	// Auth routes - all under /auth/
+	mux.Handle("/auth/", http.StripPrefix("/auth", authHandler))
 
 	// Protected routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/files/", http.StatusTemporaryRedirect)
 	})
-	mux.Handle("/files/", auth.RequireAuth(files.NewHandler(*directoryPath)))
+	mux.Handle("/files/", authHandler.RequireAuth(files.NewHandler(*directoryPath)))
 	mux.Handle("/static/", http.FileServerFS(static))
 
 	s := &http.Server{
